@@ -150,7 +150,18 @@ export function MeteoDashboardView({ config }: PluginComponentProps) {
       : measuredWidth < 820
       ? 4
       : 5;
-  const forecastDays = weather.forecast.slice(0, maxDays);
+  
+  // Filter out today from forecast
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayISO = today.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+  const forecastWithoutToday = weather.forecast.filter((day) => {
+    const dayDate = new Date(day.date);
+    dayDate.setHours(0, 0, 0, 0);
+    const dayISO = dayDate.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+    return dayISO !== todayISO;
+  });
+  const forecastDays = forecastWithoutToday.slice(0, maxDays);
   const forecastMinHeight = 140;
   // Calculate available height for forecast
   // If dimensions are not yet measured, assume we have space (will be recalculated when measured)
@@ -190,15 +201,18 @@ export function MeteoDashboardView({ config }: PluginComponentProps) {
 
       {/* Forecast */}
       {showForecast && (
-        <div
-          className="grid gap-2 overflow-hidden flex-shrink-0 mt-auto"
-          style={{ gridTemplateColumns: `repeat(${forecastDays.length}, minmax(0, 1fr))` }}
-        >
-          {forecastDays.map((day) => (
-            <div
-              key={day.date}
-              className="p-2 border border-border rounded-md flex flex-col items-center text-xs bg-card/40"
-            >
+        <div className="flex-1 flex items-center justify-center overflow-hidden">
+          <div
+            className="grid gap-2 w-full px-4"
+            style={{ 
+              gridTemplateColumns: `repeat(${forecastDays.length}, minmax(0, 1fr))`
+            }}
+          >
+            {forecastDays.map((day) => (
+              <div
+                key={day.date}
+                className="p-2 border border-border rounded-md flex flex-col items-center text-xs bg-card/40"
+              >
               <div className="text-[11px] text-muted-foreground mb-1 font-medium">
                 {formatDate(day.date)}
               </div>
@@ -212,7 +226,8 @@ export function MeteoDashboardView({ config }: PluginComponentProps) {
                 {Math.round(day.minTemperature)}°C · {Math.round(day.maxTemperature)}°C
               </div>
             </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
