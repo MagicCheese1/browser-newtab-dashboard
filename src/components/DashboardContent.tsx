@@ -1,10 +1,10 @@
 import { FrameData, saveDashboardData } from '@/lib/storage';
 import { Layout, WidthProvider } from 'react-grid-layout';
-import GridLayout from 'react-grid-layout';
 import { useEffect, useState } from 'react';
 
 import { EmptyDashboard } from './EmptyDashboard';
 import { Frame } from './Frame';
+import GridLayout from 'react-grid-layout';
 import { PluginSelector } from './PluginSelector';
 import { SettingsMenu } from './SettingsMenu';
 import { WelcomeModal } from './WelcomeModal';

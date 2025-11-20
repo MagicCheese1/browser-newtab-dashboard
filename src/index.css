@@ -118,6 +118,17 @@
   overflow: hidden;
 }
 
+/* Prevent unnecessary vertical scrollbar in react-grid-layout */
+.react-grid-layout {
+  position: relative;
+  min-height: 0 !important;
+}
+
+.react-grid-layout.layout {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
 /* Ensure react-grid-layout items are visible */
 .react-grid-item {
   visibility: visible !important;
