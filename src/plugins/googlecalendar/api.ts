@@ -1,4 +1,391 @@
-import { GoogleCalendarConfig, GoogleCalendar, GoogleCalendarEventsResponse, GoogleCalendarEvent } from './types';
+import { GoogleCalendar, GoogleCalendarConfig, GoogleCalendarEvent, GoogleCalendarEventsResponse } from './types';
+
+// Simple iCal parser
+function parseICal(icalText: string): GoogleCalendarEvent[] {
+  const events: GoogleCalendarEvent[] = [];
+  const lines = icalText.split(/\r?\n/);
+  
+  let currentEvent: Partial<GoogleCalendarEvent> | null = null;
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Handle line continuation (lines starting with space)
+    while (i + 1 < lines.length && lines[i + 1].startsWith(' ')) {
+      line += lines[i + 1].substring(1);
+      i++;
+    }
+    
+    if (line.startsWith('BEGIN:VEVENT')) {
+      currentEvent = {
+        start: {},
+        end: {},
+      };
+    } else if (line.startsWith('END:VEVENT') && currentEvent) {
+      // If no end date, use start date + 1 hour for timed events, or same day for all-day
+      if (!currentEvent.end?.dateTime && !currentEvent.end?.date) {
+        if (currentEvent.start?.dateTime) {
+          const startDate = new Date(currentEvent.start.dateTime);
+          startDate.setHours(startDate.getHours() + 1);
+          currentEvent.end = { dateTime: startDate.toISOString() };
+        } else if (currentEvent.start?.date) {
+          currentEvent.end = { date: currentEvent.start.date };
+        }
+      }
+      
+      // Convert to GoogleCalendarEvent format
+      const event: GoogleCalendarEvent = {
+        id: currentEvent.id || `ical-${Date.now()}-${Math.random()}`,
+        summary: currentEvent.summary || 'No title',
+        description: currentEvent.description,
+        start: {
+          dateTime: currentEvent.start?.dateTime,
+          date: currentEvent.start?.date,
+        },
+        end: {
+          dateTime: currentEvent.end?.dateTime,
+          date: currentEvent.end?.date,
+        },
+        location: currentEvent.location,
+        htmlLink: currentEvent.htmlLink,
+      };
+      events.push(event);
+      currentEvent = null;
+    } else if (currentEvent) {
+      if (line.startsWith('UID:')) {
+        currentEvent.id = line.substring(4).trim();
+      } else if (line.startsWith('SUMMARY:')) {
+        currentEvent.summary = line.substring(8).trim();
+      } else if (line.startsWith('DESCRIPTION:')) {
+        currentEvent.description = line.substring(12).trim();
+      } else if (line.startsWith('DTSTART')) {
+        const match = line.match(/DTSTART(?:;TZID=([^:]+))?:(.+)/);
+        if (match) {
+          const value = match[2].trim();
+          if (value.length === 8) {
+            // Date only (YYYYMMDD)
+            const year = value.substring(0, 4);
+            const month = value.substring(4, 6);
+            const day = value.substring(6, 8);
+            currentEvent.start!.date = `${year}-${month}-${day}`;
+          } else {
+            // DateTime (YYYYMMDDTHHmmss or YYYYMMDDTHHmmssZ)
+            const dt = parseICalDateTime(value);
+            currentEvent.start!.dateTime = dt.toISOString();
+          }
+        }
+      } else if (line.startsWith('DTEND')) {
+        const match = line.match(/DTEND(?:;TZID=([^:]+))?:(.+)/);
+        if (match) {
+          const value = match[2].trim();
+          if (value.length === 8) {
+            // Date only (YYYYMMDD)
+            const year = value.substring(0, 4);
+            const month = value.substring(4, 6);
+            const day = value.substring(6, 8);
+            currentEvent.end!.date = `${year}-${month}-${day}`;
+          } else {
+            // DateTime
+            const dt = parseICalDateTime(value);
+            currentEvent.end!.dateTime = dt.toISOString();
+          }
+        }
+      } else if (line.startsWith('LOCATION:')) {
+        currentEvent.location = line.substring(9).trim();
+      } else if (line.startsWith('URL:')) {
+        currentEvent.htmlLink = line.substring(4).trim();
+      }
+    }
+  }
+  
+  return events;
+}
+
+// Parse iCal datetime format (YYYYMMDDTHHmmss or YYYYMMDDTHHmmssZ)
+function parseICalDateTime(value: string): Date {
+  // Remove timezone indicator if present
+  const cleanValue = value.replace(/Z$/, '');
+  
+  // Format: YYYYMMDDTHHmmss
+  const year = parseInt(cleanValue.substring(0, 4), 10);
+  const month = parseInt(cleanValue.substring(4, 6), 10) - 1; // Month is 0-indexed
+  const day = parseInt(cleanValue.substring(6, 8), 10);
+  const hour = cleanValue.length > 9 ? parseInt(cleanValue.substring(9, 11), 10) : 0;
+  const minute = cleanValue.length > 11 ? parseInt(cleanValue.substring(11, 13), 10) : 0;
+  const second = cleanValue.length > 13 ? parseInt(cleanValue.substring(13, 15), 10) : 0;
+  
+  return new Date(Date.UTC(year, month, day, hour, minute, second));
+}
+
+// Cache configuration
+const ICAL_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+const ICAL_CACHE_PREFIX = 'ical_cache_';
+
+// Generate cache key from URL
+function getCacheKey(icalUrl: string): string {
+  // Use a simple hash of the URL as the key
+  let hash = 0;
+  for (let i = 0; i < icalUrl.length; i++) {
+    const char = icalUrl.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return `${ICAL_CACHE_PREFIX}${Math.abs(hash)}`;
+}
+
+// Load cached iCal events
+async function loadCachedICalEvents(icalUrl: string): Promise<GoogleCalendarEvent[] | null> {
+  return new Promise((resolve) => {
+    const cacheKey = getCacheKey(icalUrl);
+    const startTime = performance.now();
+    
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get([cacheKey], (result) => {
+        const cached = result[cacheKey];
+        if (!cached) {
+          console.log('[iCal Cache] Cache miss for', icalUrl.substring(0, 50) + '...');
+          resolve(null);
+          return;
+        }
+        
+        try {
+          // Handle both string and already parsed objects
+          const data = typeof cached === 'string' ? JSON.parse(cached) : cached;
+          const { events, timestamp } = data;
+          const now = Date.now();
+          const age = now - timestamp;
+          
+          // Check if cache is still valid
+          if (age < ICAL_CACHE_DURATION) {
+            const loadTime = performance.now() - startTime;
+            console.log(`[iCal Cache] Cache hit! Loaded ${events.length} events in ${loadTime.toFixed(2)}ms (cache age: ${Math.round(age / 1000)}s, key: ${cacheKey.substring(0, 20)}...)`);
+            resolve(events);
+          } else {
+            console.log(`[iCal Cache] Cache expired (age: ${Math.round(age / 1000)}s, max: ${Math.round(ICAL_CACHE_DURATION / 1000)}s)`);
+            // Cache expired, clear it by setting to null
+            chrome.storage.local.set({ [cacheKey]: null }, () => {
+              resolve(null);
+            });
+          }
+        } catch (e) {
+          console.error('[iCal Cache] Failed to parse cached iCal data:', e);
+          resolve(null);
+        }
+      });
+    } else {
+      // Fallback to localStorage
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (!cached) {
+          console.log('[iCal Cache] Cache miss (localStorage)');
+          resolve(null);
+          return;
+        }
+        
+        const { events, timestamp } = JSON.parse(cached);
+        const now = Date.now();
+        const age = now - timestamp;
+        
+        if (age < ICAL_CACHE_DURATION) {
+          const loadTime = performance.now() - startTime;
+          console.log(`[iCal Cache] Cache hit (localStorage)! Loaded ${events.length} events in ${loadTime.toFixed(2)}ms`);
+          resolve(events);
+        } else {
+          console.log(`[iCal Cache] Cache expired (localStorage, age: ${Math.round(age / 1000)}s)`);
+          localStorage.removeItem(cacheKey);
+          resolve(null);
+        }
+      } catch (e) {
+        console.error('[iCal Cache] Failed to load cached iCal data:', e);
+        resolve(null);
+      }
+    }
+  });
+}
+
+// Save iCal events to cache
+async function saveCachedICalEvents(icalUrl: string, events: GoogleCalendarEvent[]): Promise<void> {
+  return new Promise((resolve) => {
+    const cacheKey = getCacheKey(icalUrl);
+    const cacheData = {
+      events,
+      timestamp: Date.now(),
+    };
+    
+    const saveStartTime = performance.now();
+    
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ [cacheKey]: JSON.stringify(cacheData) }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('[iCal Cache] Failed to save to chrome.storage:', chrome.runtime.lastError.message);
+        } else {
+          const saveTime = performance.now() - saveStartTime;
+          console.log(`[iCal Cache] Successfully saved ${events.length} events to cache (key: ${cacheKey.substring(0, 20)}...) in ${saveTime.toFixed(2)}ms`);
+        }
+        resolve();
+      });
+    } else {
+      // Fallback to localStorage
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+        const saveTime = performance.now() - saveStartTime;
+        console.log(`[iCal Cache] Successfully saved ${events.length} events to localStorage cache in ${saveTime.toFixed(2)}ms`);
+        resolve();
+      } catch (e) {
+        console.error('[iCal Cache] Failed to save cached iCal data to localStorage:', e);
+        resolve();
+      }
+    }
+  });
+}
+
+// Fetch events from iCal URL
+async function fetchICalEvents(icalUrl: string, period: string): Promise<GoogleCalendarEvent[]> {
+  try {
+    // Validate URL format
+    try {
+      new URL(icalUrl);
+    } catch {
+      throw new Error('Invalid iCal URL format. Please check the URL and try again.');
+    }
+
+    // Try to load from cache first
+    const cachedEvents = await loadCachedICalEvents(icalUrl);
+    if (cachedEvents) {
+      // Filter cached events by period
+      const { timeMin, timeMax } = getDateRange(period);
+      const timeMinDate = new Date(timeMin);
+      const timeMaxDate = new Date(timeMax);
+      
+      const filteredEvents = cachedEvents.filter((event) => {
+        const startDate = event.start.dateTime 
+          ? new Date(event.start.dateTime)
+          : event.start.date 
+          ? new Date(event.start.date)
+          : null;
+        
+        if (!startDate) return false;
+        
+        const endDate = event.end?.dateTime 
+          ? new Date(event.end.dateTime)
+          : event.end?.date 
+          ? new Date(event.end.date)
+          : startDate;
+        
+        return startDate <= timeMaxDate && endDate >= timeMinDate;
+      });
+      
+      // Sort by start time
+      filteredEvents.sort((a, b) => {
+        const aStart = a.start.dateTime || a.start.date || '';
+        const bStart = b.start.dateTime || b.start.date || '';
+        return aStart.localeCompare(bStart);
+      });
+      
+      return filteredEvents;
+    }
+
+    // Cache miss or expired, fetch from URL
+    const response = await fetch(icalUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/calendar, text/plain, */*',
+      },
+    });
+    
+    if (!response.ok) {
+      const statusText = response.statusText || `HTTP ${response.status}`;
+      if (response.status === 404) {
+        throw new Error(`iCal URL not found (404). Please verify the URL is correct and publicly accessible.`);
+      } else if (response.status === 403) {
+        throw new Error(`Access forbidden (403). The iCal URL may require authentication or may not be publicly accessible.`);
+      } else if (response.status === 401) {
+        throw new Error(`Unauthorized (401). The iCal URL may require authentication.`);
+      } else {
+        throw new Error(`Failed to fetch iCal: ${statusText} (${response.status})`);
+      }
+    }
+    
+    const icalText = await response.text();
+    
+    if (!icalText || icalText.trim().length === 0) {
+      throw new Error('The iCal URL returned an empty response. Please verify the URL is correct.');
+    }
+    
+    // Check if it looks like an iCal file
+    if (!icalText.includes('BEGIN:VCALENDAR') && !icalText.includes('BEGIN:VEVENT')) {
+      throw new Error('The URL does not appear to be a valid iCal file. Please verify the URL points to an .ics file.');
+    }
+    
+    const parseStartTime = performance.now();
+    const allEvents = parseICal(icalText);
+    const parseTime = performance.now() - parseStartTime;
+    console.log(`[iCal] Parsed ${allEvents.length} events in ${parseTime.toFixed(2)}ms`);
+    
+    // Filter to keep only future events and today's events for cache (to save storage space)
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const cacheCutoff = todayStart.getTime(); // Keep events from today onwards
+    
+    const eventsToCache = allEvents.filter((event) => {
+      const eventEnd = event.end?.dateTime || event.end?.date;
+      if (!eventEnd) return false;
+      
+      const endDate = new Date(eventEnd);
+      // Keep events that haven't ended yet, or ended today or later
+      return endDate.getTime() >= cacheCutoff;
+    });
+    
+    console.log(`[iCal Cache] Filtered ${allEvents.length} events to ${eventsToCache.length} events for cache (today + future)`);
+    
+    // Save to cache (save only future/today events to reduce storage size)
+    const saveStartTime = performance.now();
+    await saveCachedICalEvents(icalUrl, eventsToCache);
+    const saveTime = performance.now() - saveStartTime;
+    console.log(`[iCal Cache] Saved ${eventsToCache.length} events to cache in ${saveTime.toFixed(2)}ms`);
+    
+    // Filter events by period
+    const { timeMin, timeMax } = getDateRange(period);
+    const timeMinDate = new Date(timeMin);
+    const timeMaxDate = new Date(timeMax);
+    
+    const filteredEvents = allEvents.filter((event) => {
+      const startDate = event.start.dateTime 
+        ? new Date(event.start.dateTime)
+        : event.start.date 
+        ? new Date(event.start.date)
+        : null;
+      
+      if (!startDate) return false;
+      
+      // Include events that start within the period or overlap with it
+      const endDate = event.end?.dateTime 
+        ? new Date(event.end.dateTime)
+        : event.end?.date 
+        ? new Date(event.end.date)
+        : startDate;
+      
+      return startDate <= timeMaxDate && endDate >= timeMinDate;
+    });
+    
+    // Sort by start time
+    filteredEvents.sort((a, b) => {
+      const aStart = a.start.dateTime || a.start.date || '';
+      const bStart = b.start.dateTime || b.start.date || '';
+      return aStart.localeCompare(bStart);
+    });
+    
+    return filteredEvents;
+  } catch (error) {
+    console.error('Failed to fetch iCal events:', error);
+    // Re-throw with more context if it's not already a detailed error
+    if (error instanceof Error) {
+      throw error;
+    } else {
+      throw new Error(`Failed to fetch iCal events: ${String(error)}`);
+    }
+  }
+}
 
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const GOOGLE_CALENDAR_LIST_URL = 'https://www.googleapis.com/calendar/v3/users/me/calendarList';
@@ -279,6 +666,17 @@ function getDateRange(period: string): { timeMin: string; timeMax: string } {
 export async function fetchGoogleCalendarEvents(
   config: GoogleCalendarConfig
 ): Promise<GoogleCalendarEvent[]> {
+  const authType = config.authType || (config.accessToken ? 'oauth' : 'ical');
+  
+  // Handle iCal URL
+  if (authType === 'ical') {
+    if (!config.icalUrl) {
+      return [];
+    }
+    return fetchICalEvents(config.icalUrl, config.period);
+  }
+  
+  // Handle OAuth
   if (!config.accessToken || !config.selectedCalendarIds || config.selectedCalendarIds.length === 0) {
     return [];
   }

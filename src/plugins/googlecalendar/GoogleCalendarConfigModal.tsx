@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { Calendar, ChevronDown, Link as LinkIcon, LogOut, X } from 'lucide-react';
+import { GoogleCalendar, GoogleCalendarAuthType, GoogleCalendarConfig, GoogleCalendarPeriod } from './types';
+import { authenticateGoogle, fetchGoogleCalendars, revokeGoogleAuth } from './api';
+import { useEffect, useState } from 'react';
+
 import { createPortal } from 'react-dom';
-import { GoogleCalendarConfig, GoogleCalendarPeriod, GoogleCalendar } from './types';
-import { X, Calendar, ChevronDown, LogOut } from 'lucide-react';
-import { authenticateGoogle, revokeGoogleAuth, fetchGoogleCalendars } from './api';
 
 interface GoogleCalendarConfigModalProps {
   config: GoogleCalendarConfig;
@@ -18,7 +19,12 @@ const PERIODS: { id: GoogleCalendarPeriod; label: string }[] = [
 ];
 
 export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCalendarConfigModalProps) {
+  // Determine auth type: if icalUrl exists, use 'ical', otherwise use 'oauth' or default
+  const [authType, setAuthType] = useState<GoogleCalendarAuthType>(
+    config?.authType || (config?.icalUrl ? 'ical' : 'oauth')
+  );
   const [accessToken, setAccessToken] = useState<string | undefined>(config?.accessToken);
+  const [icalUrl, setIcalUrl] = useState<string>(config?.icalUrl || '');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
   const [isLoadingCalendars, setIsLoadingCalendars] = useState(false);
@@ -27,13 +33,30 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
   );
   const [period, setPeriod] = useState<GoogleCalendarPeriod>(config?.period || '1-day');
   const [showPeriodPopover, setShowPeriodPopover] = useState(false);
+  const [showAuthTypePopover, setShowAuthTypePopover] = useState(false);
 
-  // Load calendars when authenticated
+  // Load calendars when authenticated (OAuth mode only)
   useEffect(() => {
-    if (accessToken) {
+    if (authType === 'oauth' && accessToken) {
       loadCalendars();
     }
-  }, [accessToken]);
+  }, [accessToken, authType]);
+  
+  // Reset OAuth data when switching to iCal
+  useEffect(() => {
+    if (authType === 'ical') {
+      setAccessToken(undefined);
+      setCalendars([]);
+      setSelectedCalendarIds([]);
+    }
+  }, [authType]);
+  
+  // Reset iCal URL when switching to OAuth
+  useEffect(() => {
+    if (authType === 'oauth') {
+      setIcalUrl('');
+    }
+  }, [authType]);
 
   const loadCalendars = async () => {
     if (!accessToken) return;
@@ -107,23 +130,48 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!accessToken) {
-      alert('Please authenticate with Google first.');
-      return;
+    if (authType === 'oauth') {
+      if (!accessToken) {
+        alert('Please authenticate with Google first.');
+        return;
+      }
+
+      if (selectedCalendarIds.length === 0) {
+        alert('Please select at least one calendar.');
+        return;
+      }
+
+      const newConfig: GoogleCalendarConfig = {
+        authType: 'oauth',
+        accessToken,
+        selectedCalendarIds,
+        period,
+      };
+
+      onSave(newConfig);
+    } else {
+      // iCal mode
+      if (!icalUrl.trim()) {
+        alert('Please enter an iCal URL.');
+        return;
+      }
+
+      // Validate URL
+      try {
+        new URL(icalUrl.trim());
+      } catch {
+        alert('Please enter a valid URL.');
+        return;
+      }
+
+      const newConfig: GoogleCalendarConfig = {
+        authType: 'ical',
+        icalUrl: icalUrl.trim(),
+        period,
+      };
+
+      onSave(newConfig);
     }
-
-    if (selectedCalendarIds.length === 0) {
-      alert('Please select at least one calendar.');
-      return;
-    }
-
-    const newConfig: GoogleCalendarConfig = {
-      accessToken,
-      selectedCalendarIds,
-      period,
-    };
-
-    onSave(newConfig);
   };
 
   const periodLabel = PERIODS.find((p) => p.id === period)?.label || period;
@@ -134,14 +182,15 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
       const target = e.target as HTMLElement;
       if (!target.closest('.popover-container')) {
         setShowPeriodPopover(false);
+        setShowAuthTypePopover(false);
       }
     };
 
-    if (showPeriodPopover) {
+    if (showPeriodPopover || showAuthTypePopover) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showPeriodPopover]);
+  }, [showPeriodPopover, showAuthTypePopover]);
 
   const modalContent = (
     <div
@@ -165,12 +214,59 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Google Authentication */}
+          {/* Authentication Type Selection */}
           <div>
             <label className="text-sm font-medium mb-2 block">
-              Google Authentication
+              Calendar Source
             </label>
-            {!accessToken ? (
+            <div className="relative popover-container">
+              <button
+                type="button"
+                onClick={() => setShowAuthTypePopover((prev) => !prev)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 border border-input rounded-md bg-background hover:bg-accent"
+              >
+                <span>
+                  {authType === 'oauth' ? 'Google Calendar (OAuth)' : 'Public iCal URL'}
+                </span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              {showAuthTypePopover && (
+                <div
+                  className="absolute z-10 mt-1 w-full bg-popover border border-border rounded-md shadow-lg"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthType('oauth');
+                      setShowAuthTypePopover(false);
+                    }}
+                    className="w-full px-3 py-2 text-sm text-left hover:bg-accent"
+                  >
+                    Google Calendar (OAuth)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthType('ical');
+                      setShowAuthTypePopover(false);
+                    }}
+                    className="w-full px-3 py-2 text-sm text-left hover:bg-accent"
+                  >
+                    Public iCal URL
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* OAuth Authentication */}
+          {authType === 'oauth' && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Google Authentication
+              </label>
+              {!accessToken ? (
               <button
                 type="button"
                 onClick={handleGoogleAuth}
@@ -224,10 +320,34 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
                 </button>
               </div>
             )}
-          </div>
+            </div>
+          )}
 
-          {/* Calendar Selection */}
-          {accessToken && (
+          {/* iCal URL Input */}
+          {authType === 'ical' && (
+            <div>
+              <label htmlFor="icalUrl" className="text-sm font-medium mb-2 block">
+                Public iCal URL
+              </label>
+              <div className="flex items-center gap-2">
+                <LinkIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <input
+                  id="icalUrl"
+                  type="url"
+                  value={icalUrl}
+                  onChange={(e) => setIcalUrl(e.target.value)}
+                  placeholder="https://calendar.google.com/calendar/ical/..."
+                  className="flex-1 px-3 py-2 border border-input rounded-md bg-background"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Enter the public iCal URL of your calendar. Most calendar services provide a public iCal feed URL.
+              </p>
+            </div>
+          )}
+
+          {/* Calendar Selection (OAuth only) */}
+          {authType === 'oauth' && accessToken && (
             <div>
               <label className="text-sm font-medium mb-2 block">
                 Calendars to display
@@ -315,7 +435,11 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
             </button>
             <button
               type="submit"
-              disabled={!accessToken || selectedCalendarIds.length === 0}
+              disabled={
+                authType === 'oauth' 
+                  ? (!accessToken || selectedCalendarIds.length === 0)
+                  : !icalUrl.trim()
+              }
               className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Save

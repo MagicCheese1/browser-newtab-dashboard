@@ -7,8 +7,10 @@ import { fetchGoogleCalendarEvents, groupEventsByDay } from './api';
 
 export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
   const googleCalendarConfig: GoogleCalendarConfig = {
+    authType: (config as unknown as GoogleCalendarConfig)?.authType,
     accessToken: (config as unknown as GoogleCalendarConfig)?.accessToken,
     selectedCalendarIds: (config as unknown as GoogleCalendarConfig)?.selectedCalendarIds || [],
+    icalUrl: (config as unknown as GoogleCalendarConfig)?.icalUrl,
     period: (config as unknown as GoogleCalendarConfig)?.period || '1-day',
   };
 
@@ -23,17 +25,31 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
 
   useEffect(() => {
     const loadEvents = async () => {
-      if (!googleCalendarConfig.accessToken || googleCalendarConfig.selectedCalendarIds.length === 0) {
-        setError('Please configure the Google Calendar widget.');
-        setIsLoading(false);
-        return;
+      const authType = googleCalendarConfig.authType || (googleCalendarConfig.accessToken ? 'oauth' : 'ical');
+      
+      // Validate configuration based on auth type
+      if (authType === 'oauth') {
+        if (!googleCalendarConfig.accessToken || !googleCalendarConfig.selectedCalendarIds || googleCalendarConfig.selectedCalendarIds.length === 0) {
+          setError('Please configure the Google Calendar widget.');
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        if (!googleCalendarConfig.icalUrl) {
+          setError('Please configure the iCal URL.');
+          setIsLoading(false);
+          return;
+        }
       }
 
       setIsLoading(true);
       setError(null);
 
       try {
+        const fetchStartTime = performance.now();
         const fetchedEvents = await fetchGoogleCalendarEvents(googleCalendarConfig);
+        const fetchTime = performance.now() - fetchStartTime;
+        console.log(`[Calendar] Fetched ${fetchedEvents.length} events in ${fetchTime.toFixed(2)}ms`);
         setEvents(fetchedEvents);
         setError(null);
       } catch (err) {
@@ -57,8 +73,10 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
     const interval = setInterval(loadEvents, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [
+    googleCalendarConfig.authType,
     googleCalendarConfig.accessToken,
     googleCalendarConfig.selectedCalendarIds?.join(',') || '',
+    googleCalendarConfig.icalUrl,
     googleCalendarConfig.period,
   ]);
 
@@ -192,6 +210,132 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
     const height = (endHour - startHour) * hourHeight;
     
     return { top, height: Math.max(height, 30) }; // Minimum height of 30px
+  };
+
+  // Check if two events overlap
+  const eventsOverlap = (event1: GoogleCalendarEvent, event2: GoogleCalendarEvent): boolean => {
+    if (!event1.start.dateTime || !event1.end?.dateTime || !event2.start.dateTime || !event2.end?.dateTime) {
+      return false;
+    }
+    
+    const start1 = new Date(event1.start.dateTime).getTime();
+    const end1 = new Date(event1.end.dateTime).getTime();
+    const start2 = new Date(event2.start.dateTime).getTime();
+    const end2 = new Date(event2.end.dateTime).getTime();
+    
+    return start1 < end2 && start2 < end1;
+  };
+
+  // Calculate layout for overlapping events (like Google Calendar)
+  const calculateEventLayout = (events: GoogleCalendarEvent[]): Map<string, { left: number; width: number }> => {
+    const layout = new Map<string, { left: number; width: number }>();
+    
+    if (events.length === 0) return layout;
+    
+    const layoutStartTime = performance.now();
+    
+    // Separate timed events from all-day events
+    const timedEvents = events.filter(e => e.start.dateTime && e.end?.dateTime);
+    
+    if (timedEvents.length === 0) return layout;
+    
+    // Build overlap graph
+    const overlaps: Map<string, Set<string>> = new Map();
+    timedEvents.forEach(event => {
+      overlaps.set(event.id, new Set());
+    });
+    
+    for (let i = 0; i < timedEvents.length; i++) {
+      for (let j = i + 1; j < timedEvents.length; j++) {
+        if (eventsOverlap(timedEvents[i], timedEvents[j])) {
+          overlaps.get(timedEvents[i].id)!.add(timedEvents[j].id);
+          overlaps.get(timedEvents[j].id)!.add(timedEvents[i].id);
+        }
+      }
+    }
+    
+    // Find connected components (groups of overlapping events)
+    const visited = new Set<string>();
+    const components: string[][] = [];
+    
+    const dfs = (eventId: string, component: string[]) => {
+      if (visited.has(eventId)) return;
+      visited.add(eventId);
+      component.push(eventId);
+      
+      const neighbors = overlaps.get(eventId) || new Set();
+      neighbors.forEach(neighborId => {
+        if (!visited.has(neighborId)) {
+          dfs(neighborId, component);
+        }
+      });
+    };
+    
+    timedEvents.forEach(event => {
+      if (!visited.has(event.id)) {
+        const component: string[] = [];
+        dfs(event.id, component);
+        if (component.length > 0) {
+          components.push(component);
+        }
+      }
+    });
+    
+    // For each component, calculate column assignments
+    components.forEach(component => {
+      // Sort events by start time
+      const sortedEvents = component
+        .map(id => timedEvents.find(e => e.id === id)!)
+        .sort((a, b) => {
+          const startA = new Date(a.start.dateTime!).getTime();
+          const startB = new Date(b.start.dateTime!).getTime();
+          return startA - startB;
+        });
+      
+      // Assign columns using greedy algorithm
+      const columns: Map<string, number> = new Map();
+      const eventEnds: Map<number, number> = new Map(); // column -> end time
+      
+      sortedEvents.forEach(event => {
+        const eventStartTime = new Date(event.start.dateTime!).getTime();
+        const eventEndTime = new Date(event.end!.dateTime!).getTime();
+        
+        // Find the first available column (where previous event has ended)
+        let column = 0;
+        while (eventEnds.has(column) && eventEnds.get(column)! > eventStartTime) {
+          column++;
+        }
+        
+        columns.set(event.id, column);
+        eventEnds.set(column, eventEndTime);
+      });
+      
+      // Calculate maximum columns in this component
+      const maxColumns = Math.max(...Array.from(columns.values())) + 1;
+      
+      // Calculate width and left position for each event
+      sortedEvents.forEach(event => {
+        const column = columns.get(event.id)!;
+        const width = 100 / maxColumns;
+        const left = column * width;
+        
+        layout.set(event.id, { left, width });
+      });
+    });
+    
+    // Events without overlaps get full width
+    timedEvents.forEach(event => {
+      if (!layout.has(event.id)) {
+        layout.set(event.id, { left: 0, width: 100 });
+      }
+    });
+    
+    const layoutEndTime = performance.now();
+    if (events.length > 10) {
+      console.log(`[Calendar Layout] Calculated layout for ${events.length} events in ${(layoutEndTime - layoutStartTime).toFixed(2)}ms`);
+    }
+    
+    return layout;
   };
 
   // Generate hours for timeline (0-23)
@@ -337,7 +481,12 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
     );
   }
 
-  if (error || !googleCalendarConfig.accessToken) {
+  const authType = googleCalendarConfig.authType || (googleCalendarConfig.accessToken ? 'oauth' : 'ical');
+  const isConfigured = authType === 'oauth' 
+    ? (googleCalendarConfig.accessToken && googleCalendarConfig.selectedCalendarIds && googleCalendarConfig.selectedCalendarIds.length > 0)
+    : !!googleCalendarConfig.icalUrl;
+
+  if (error || !isConfigured) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 text-center text-sm text-muted-foreground">
         <AlertCircle className="w-6 h-6 text-destructive mb-2" />
@@ -405,6 +554,7 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
               const date = String(day.getDate()).padStart(2, '0');
               const dayKey = `${year}-${month}-${date}`;
               const dayEvents = eventsByDay.get(dayKey) || [];
+              const eventLayout = calculateEventLayout(dayEvents);
 
               return (
                 <div key={dayKey} className="relative min-w-0" style={{ height: `${24 * 60}px` }}>
@@ -426,6 +576,7 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
                   {dayEvents.map((event) => {
                     const isPast = isEventPast(event);
                     const position = getEventPosition(event);
+                    const layout = eventLayout.get(event.id) || { left: 0, width: 100 };
                     
                     // Handle all-day events
                     if (!position) {
@@ -463,7 +614,7 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
                           }
                         }}
                         onClick={(e) => handleEventClick(event, e.currentTarget)}
-                        className={`absolute left-0 right-0 text-left p-1.5 rounded border border-border transition-colors overflow-hidden ${
+                        className={`absolute text-left p-1.5 rounded border border-border transition-colors overflow-hidden ${
                           isPast
                             ? 'bg-muted/50 text-muted-foreground opacity-60 hover:bg-muted/70'
                             : 'bg-card hover:bg-accent'
@@ -472,6 +623,8 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
                           top: `${position.top}px`,
                           height: `${position.height}px`,
                           minHeight: '30px',
+                          left: `${layout.left}%`,
+                          width: `${layout.width}%`,
                         }}
                       >
                         <div className="text-xs font-medium truncate">{event.summary || 'No title'}</div>

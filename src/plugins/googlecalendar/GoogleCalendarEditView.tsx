@@ -5,8 +5,10 @@ import { PluginComponentProps } from '@/types/plugin';
 
 export function GoogleCalendarEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
   const googleCalendarConfig: GoogleCalendarConfig = {
+    authType: (config as unknown as GoogleCalendarConfig)?.authType,
     accessToken: (config as unknown as GoogleCalendarConfig)?.accessToken,
     selectedCalendarIds: (config as unknown as GoogleCalendarConfig)?.selectedCalendarIds || [],
+    icalUrl: (config as unknown as GoogleCalendarConfig)?.icalUrl,
     period: (config as unknown as GoogleCalendarConfig)?.period || '1-day',
   };
 

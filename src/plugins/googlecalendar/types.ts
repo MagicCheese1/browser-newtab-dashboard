@@ -1,9 +1,12 @@
 export type GoogleCalendarPeriod = '1-day' | '3-days' | '5-days' | 'week';
+export type GoogleCalendarAuthType = 'oauth' | 'ical';
 
 export interface GoogleCalendarConfig {
-  accessToken?: string;
-  refreshToken?: string;
-  selectedCalendarIds: string[];
+  authType?: GoogleCalendarAuthType; // 'oauth' or 'ical'
+  accessToken?: string; // For OAuth
+  refreshToken?: string; // For OAuth
+  selectedCalendarIds?: string[]; // For OAuth
+  icalUrl?: string; // For iCal public URL
   period: GoogleCalendarPeriod;
 }
 
