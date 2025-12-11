@@ -1,7 +1,7 @@
-import { Plugin } from '@/types/plugin';
+import { Bookmark } from 'lucide-react';
 import { BookmarksDashboardView } from './BookmarksDashboardView';
 import { BookmarksEditView } from './BookmarksEditView';
-import { Bookmark } from 'lucide-react';
+import { Plugin } from '@/types/plugin';
 
 export const BookmarksPlugin: Plugin = {
   metadata: {
@@ -9,7 +9,7 @@ export const BookmarksPlugin: Plugin = {
     name: 'Bookmarks',
     description: 'Manage and access your favorite bookmarks',
     icon: 'bookmark',
-    version: '1.0.0',
+    version: '1.0.3',
   },
   DashboardView: BookmarksDashboardView,
   EditView: BookmarksEditView,

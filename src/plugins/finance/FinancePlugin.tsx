@@ -9,7 +9,7 @@ export const FinancePlugin: Plugin = {
     name: 'Firefly',
     description: 'View financial summary and net worth',
     icon: 'finance',
-    version: '1.0.0',
+    version: '1.0.3',
   },
   DashboardView: FinanceDashboardView,
   EditView: FinanceEditView,

@@ -1,7 +1,7 @@
+import { ListTodo } from 'lucide-react';
 import { Plugin } from '@/types/plugin';
 import { YoutrackDashboardView } from './YoutrackDashboardView';
 import { YoutrackEditView } from './YoutrackEditView';
-import { ListTodo } from 'lucide-react';
 
 export const YoutrackPlugin: Plugin = {
   metadata: {
@@ -9,7 +9,7 @@ export const YoutrackPlugin: Plugin = {
     name: 'Youtrack',
     description: 'View and manage Youtrack issues',
     icon: 'youtrack',
-    version: '1.0.0',
+    version: '1.0.3',
   },
   DashboardView: YoutrackDashboardView,
   EditView: YoutrackEditView,

@@ -170,7 +170,7 @@ export function DashboardContent({ initialData }: DashboardContentProps) {
 
   const handleExport = () => {
     const exportData = {
-      version: '1.0.0',
+      version: '1.0.3',
       exportDate: new Date().toISOString(),
       frames: frames.map((frame) => ({
         id: frame.id,

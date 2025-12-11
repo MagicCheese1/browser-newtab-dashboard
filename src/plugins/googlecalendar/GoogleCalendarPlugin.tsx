@@ -9,7 +9,7 @@ export const GoogleCalendarPlugin: Plugin = {
     name: 'Google Calendar',
     description: 'Affichez vos événements Google Calendar',
     icon: 'calendar',
-    version: '1.0.0',
+    version: '1.0.3',
   },
   DashboardView: GoogleCalendarDashboardView,
   EditView: GoogleCalendarEditView,

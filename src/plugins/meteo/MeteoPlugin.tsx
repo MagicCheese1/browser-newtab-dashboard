@@ -1,7 +1,7 @@
-import { Plugin } from '@/types/plugin';
+import { CloudSun } from 'lucide-react';
 import { MeteoDashboardView } from './MeteoDashboardView';
 import { MeteoEditView } from './MeteoEditView';
-import { CloudSun } from 'lucide-react';
+import { Plugin } from '@/types/plugin';
 
 export const MeteoPlugin: Plugin = {
   metadata: {
@@ -9,7 +9,7 @@ export const MeteoPlugin: Plugin = {
     name: 'Weather',
     description: 'Display current weather and forecast',
     icon: 'weather',
-    version: '1.0.0',
+    version: '1.0.3',
   },
   DashboardView: MeteoDashboardView,
   EditView: MeteoEditView,

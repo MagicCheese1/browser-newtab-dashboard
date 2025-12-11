@@ -340,7 +340,11 @@ This project is licensed under the MIT License.
 
 ## Version History
 
-- **1.0.2**: Current version
+- **1.0.3**: Current version
+  - Fix path in manifest
+  - Remove unused permission
+
+- **1.0.2**:
   - Multiple widget types
   - Export/Import functionality
   - Dark mode support
