@@ -1,6 +1,6 @@
 import { DashboardData, FrameData, SpaceData, deleteSpace, saveSpaceFrames, setActiveSpace } from '@/lib/storage';
 import { Layout, WidthProvider } from 'react-grid-layout';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { DeleteSpaceModal } from './DeleteSpaceModal';
 import { EmptyDashboard } from './EmptyDashboard';
@@ -26,6 +26,7 @@ export function DashboardContent({ initialData }: DashboardContentProps) {
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [spaceToDelete, setSpaceToDelete] = useState<SpaceData | null>(null);
+  const lastAddedFrameId = useRef<string | null>(null);
   
   const activeSpace = spaces.find((s) => s.id === activeSpaceId) || spaces[0];
   const frames = activeSpace?.frames || [];
@@ -56,6 +57,129 @@ export function DashboardContent({ initialData }: DashboardContentProps) {
       }
     }
   }, [frames.length]);
+
+  // Scroll to newly added widget if it's outside the visible area
+  useEffect(() => {
+    if (lastAddedFrameId.current) {
+      const frameId = lastAddedFrameId.current;
+      const frame = frames.find(f => f.id === frameId);
+      
+      if (!frame) {
+        lastAddedFrameId.current = null;
+        return;
+      }
+      
+      // Function to attempt scrolling
+      const attemptScroll = (retries = 20) => {
+        // Try multiple approaches to find the element
+        
+        // Approach 1: Find by data-grid-id attribute and get parent .react-grid-item
+        let targetElement: HTMLElement | null = null;
+        const frameContainer = document.querySelector(`[data-grid-id="${frameId}"]`) as HTMLElement;
+        
+        if (frameContainer) {
+          // Find the parent .react-grid-item element (react-grid-layout wraps our div)
+          targetElement = frameContainer.closest('.react-grid-item') as HTMLElement;
+          
+          // If not found as parent, the frameContainer itself might be the grid item
+          if (!targetElement && frameContainer.classList.contains('react-grid-item')) {
+            targetElement = frameContainer;
+          }
+        }
+        
+        // Approach 2: Search all grid items
+        if (!targetElement) {
+          const gridItems = document.querySelectorAll('.react-grid-item');
+          for (const gridItem of Array.from(gridItems)) {
+            const gridItemElement = gridItem as HTMLElement;
+            // Check if this grid item contains our frame
+            const container = gridItemElement.querySelector(`[data-grid-id="${frameId}"]`);
+            if (container) {
+              targetElement = gridItemElement;
+              break;
+            }
+          }
+        }
+        
+        if (targetElement) {
+          const rect = targetElement.getBoundingClientRect();
+          
+          // Check if element has valid dimensions (is rendered)
+          if (rect.width > 0 && rect.height > 0) {
+            const viewportHeight = window.innerHeight;
+            const viewportWidth = window.innerWidth;
+            
+            // Calculate the center of the element
+            const elementCenterY = rect.top + (rect.height / 2);
+            const elementCenterX = rect.left + (rect.width / 2);
+            
+            // Check if the center of the widget is outside the visible area
+            // We want to scroll if the center is not visible, not just if any part is outside
+            const isCenterOutsideViewport = 
+              elementCenterY < 0 || 
+              elementCenterY > viewportHeight || 
+              elementCenterX < 0 || 
+              elementCenterX > viewportWidth;
+            
+            // Also check if element is completely outside viewport
+            const isCompletelyOutside = 
+              rect.bottom < 0 || 
+              rect.top > viewportHeight || 
+              rect.right < 0 || 
+              rect.left > viewportWidth;
+
+            console.log(`[Scroll Debug] Frame ${frameId}:`, {
+              found: true,
+              rect: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height },
+              center: { x: elementCenterX, y: elementCenterY },
+              viewport: { height: viewportHeight, width: viewportWidth },
+              isCenterOutsideViewport,
+              isCompletelyOutside
+            });
+
+            // Scroll if center is outside viewport or element is completely outside
+            if (isCenterOutsideViewport || isCompletelyOutside) {
+              console.log(`[Scroll Debug] Scrolling to frame ${frameId}`);
+              
+              // Scroll the element into view, centering it
+              targetElement.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center',
+                inline: 'center'
+              });
+            } else {
+              console.log(`[Scroll Debug] Frame ${frameId} center is already visible`);
+            }
+            lastAddedFrameId.current = null;
+            return true;
+          } else {
+            console.log(`[Scroll Debug] Frame ${frameId} found but not rendered yet (dimensions: ${rect.width}x${rect.height})`);
+          }
+        } else {
+          console.log(`[Scroll Debug] Frame ${frameId} not found in DOM (retries left: ${retries})`);
+          // Log all grid items for debugging
+          const allGridItems = document.querySelectorAll('.react-grid-item');
+          console.log(`[Scroll Debug] Found ${allGridItems.length} grid items in total`);
+        }
+        
+        // If element not found or not rendered yet, and we have retries left, try again
+        if (retries > 0) {
+          setTimeout(() => attemptScroll(retries - 1), 100);
+        } else {
+          // Give up after max retries
+          console.warn(`[Scroll Debug] Could not scroll to frame ${frameId} after multiple attempts`);
+          lastAddedFrameId.current = null;
+        }
+        return false;
+      };
+
+      // Start attempting to scroll after a delay to allow react-grid-layout to render
+      setTimeout(() => {
+        console.log(`[Scroll Debug] Starting scroll attempt for frame ${frameId}`);
+        attemptScroll();
+      }, 300);
+    }
+  }, [frames]);
 
   const handleSpaceSelect = async (spaceId: string) => {
     if (spaceId === activeSpaceId) return;
@@ -94,18 +218,107 @@ export function DashboardContent({ initialData }: DashboardContentProps) {
     }
   };
 
-  const handleLayoutChange = (layout: Layout[]) => {
-    const updatedFrames = frames.map((frame) => {
-      const layoutItem = layout.find((item) => item.i === frame.id);
-      if (layoutItem) {
-        return {
-          ...frame,
-          x: layoutItem.x,
-          y: layoutItem.y,
-          w: layoutItem.w,
-          h: layoutItem.h,
-        };
+  // Helper function to check if two rectangles overlap
+  const doRectsOverlap = (
+    x1: number, y1: number, w1: number, h1: number,
+    x2: number, y2: number, w2: number, h2: number
+  ): boolean => {
+    return !(x1 + w1 <= x2 || x2 + w2 <= x1 || y1 + h1 <= y2 || y2 + h2 <= y1);
+  };
+
+  // Helper function to find the first available position for a new widget
+  const findAvailablePosition = (newWidth: number, newHeight: number): { x: number; y: number } => {
+    const cols = 12;
+    const maxY = frames.length > 0 
+      ? Math.max(...frames.map(f => f.y + f.h)) + 1 
+      : 0;
+
+    // Try positions from top to bottom, left to right
+    for (let y = 0; y <= maxY; y++) {
+      for (let x = 0; x <= cols - newWidth; x++) {
+        const hasCollision = frames.some((frame) => {
+          return doRectsOverlap(
+            x, y, newWidth, newHeight,
+            frame.x, frame.y, frame.w, frame.h
+          );
+        });
+
+        if (!hasCollision) {
+          return { x, y };
+        }
       }
+    }
+
+    // If no position found, place it below all existing widgets
+    return { x: 0, y: maxY };
+  };
+
+  const handleLayoutChange = (layout: Layout[]) => {
+    // Find which item was moved by comparing with current layout
+    const currentLayout: Layout[] = frames.map((frame) => ({
+      i: frame.id,
+      x: frame.x,
+      y: frame.y,
+      w: frame.w,
+      h: frame.h,
+    }));
+
+    // Find the item that changed position
+    const movedItem = layout.find((newItem) => {
+      const oldItem = currentLayout.find((item) => item.i === newItem.i);
+      if (!oldItem) return false;
+      return oldItem.x !== newItem.x || oldItem.y !== newItem.y;
+    });
+
+    if (!movedItem) {
+      // No item was moved, might be a resize
+      const updatedFrames = frames.map((frame) => {
+        const layoutItem = layout.find((item) => item.i === frame.id);
+        if (layoutItem) {
+          return {
+            ...frame,
+            x: layoutItem.x,
+            y: layoutItem.y,
+            w: layoutItem.w,
+            h: layoutItem.h,
+          };
+        }
+        return frame;
+      });
+      updateActiveSpaceFrames(updatedFrames);
+      return;
+    }
+
+    // Check if the new position overlaps with any other block
+    const hasCollision = layout.some((item) => {
+      if (item.i === movedItem.i) return false; // Skip self
+      
+      return doRectsOverlap(
+        movedItem.x, movedItem.y, movedItem.w, movedItem.h,
+        item.x, item.y, item.w, item.h
+      );
+    });
+
+    if (hasCollision) {
+      // Revert to original position - don't update anything
+      return;
+    }
+
+    // No collision - update only the moved item, keep others unchanged
+    const updatedFrames = frames.map((frame) => {
+      if (frame.id === movedItem.i) {
+        const layoutItem = layout.find((item) => item.i === frame.id);
+        if (layoutItem) {
+          return {
+            ...frame,
+            x: layoutItem.x,
+            y: layoutItem.y,
+            w: layoutItem.w,
+            h: layoutItem.h,
+          };
+        }
+      }
+      // Keep other frames unchanged
       return frame;
     });
 
@@ -113,16 +326,21 @@ export function DashboardContent({ initialData }: DashboardContentProps) {
   };
 
   const handleAddFrame = (pluginId: string) => {
+    const newWidth = 4;
+    const newHeight = 4;
+    const position = findAvailablePosition(newWidth, newHeight);
+    
     const newFrame: FrameData = {
       id: `frame-${Date.now()}`,
       pluginId,
-      x: 0,
-      y: 0,
-      w: 4,
-      h: 4,
+      x: position.x,
+      y: position.y,
+      w: newWidth,
+      h: newHeight,
       config: {},
     };
 
+    lastAddedFrameId.current = newFrame.id;
     const newFrames = [...frames, newFrame];
     updateActiveSpaceFrames(newFrames);
     setShowPluginSelector(false);
@@ -294,9 +512,10 @@ export function DashboardContent({ initialData }: DashboardContentProps) {
             isResizable={true}
             draggableHandle=".drag-handle"
             compactType={null}
+            preventCollision={true}
           >
             {frames.map((frame) => (
-              <div key={frame.id}>
+              <div key={frame.id} data-grid-id={frame.id}>
                 <Frame
                   frame={frame}
                   onDelete={handleDeleteFrame}
