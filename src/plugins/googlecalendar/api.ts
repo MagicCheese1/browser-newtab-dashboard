@@ -118,7 +118,7 @@ function parseICalDateTime(value: string): Date {
 }
 
 // Cache configuration
-const ICAL_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+const ICAL_CACHE_DURATION = 4 * 60 * 60 * 1000; // 4 hours in milliseconds
 const ICAL_CACHE_PREFIX = 'ical_cache_';
 
 // Generate cache key from URL
