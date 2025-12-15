@@ -3,7 +3,7 @@ import { PluginComponentProps } from '@/types/plugin';
 import { MeteoConfig } from './types';
 import { MeteoConfigModal } from './MeteoConfigModal';
 
-export function MeteoEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
+export function MeteoEditView({ config, onConfigChange, isEditing, onExitEditMode }: PluginComponentProps) {
   const meteoConfig = (config as unknown as MeteoConfig) || {
     provider: 'openweather',
     apiKey: '',
@@ -20,10 +20,12 @@ export function MeteoEditView({ config, onConfigChange, isEditing }: PluginCompo
   const handleSave = (newConfig: MeteoConfig) => {
     onConfigChange(newConfig as unknown as Record<string, unknown>);
     setShowModal(false);
+    onExitEditMode();
   };
 
   const handleClose = () => {
     setShowModal(false);
+    onExitEditMode();
   };
 
   if (!showModal) {

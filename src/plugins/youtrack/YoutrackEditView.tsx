@@ -6,7 +6,7 @@ import { YoutrackConfigModal } from './YoutrackConfigModal';
 const DEFAULT_ISSUE_FIELDS = 'id,idReadable,created,updated,resolved,reporter(email),updater(email),commentsCount,tags(name),customFields($type,id,projectCustomField($type,id,field($type,id,name)),value($type,name,minutes,presentation)),summary,description';
 const DEFAULT_QUERY = '#Unresolved';
 
-export function YoutrackEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
+export function YoutrackEditView({ config, onConfigChange, isEditing, onExitEditMode }: PluginComponentProps) {
   const youtrackConfig = (config as unknown as YoutrackConfig) || {
     baseUrl: '',
     apiEndpoint: '',
@@ -27,10 +27,12 @@ export function YoutrackEditView({ config, onConfigChange, isEditing }: PluginCo
   const handleSave = (newConfig: YoutrackConfig) => {
     onConfigChange(newConfig as unknown as Record<string, unknown>);
     setShowModal(false);
+    onExitEditMode();
   };
 
   const handleClose = () => {
     setShowModal(false);
+    onExitEditMode();
   };
 
   if (!showModal) {

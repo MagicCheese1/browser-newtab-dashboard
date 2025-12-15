@@ -14,6 +14,7 @@ export interface PluginComponentProps {
   config: PluginConfig;
   isEditing: boolean;
   onConfigChange: (config: PluginConfig) => void;
+  onExitEditMode: () => void;
 }
 
 export interface Plugin {
