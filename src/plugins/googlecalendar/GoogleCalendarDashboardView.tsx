@@ -13,6 +13,7 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
     selectedCalendarIds: (config as unknown as GoogleCalendarConfig)?.selectedCalendarIds || [],
     icalUrl: (config as unknown as GoogleCalendarConfig)?.icalUrl,
     period: (config as unknown as GoogleCalendarConfig)?.period || '1-day',
+    userEmail: (config as unknown as GoogleCalendarConfig)?.userEmail,
   };
 
   const [events, setEvents] = useState<GoogleCalendarEvent[]>([]);
@@ -151,73 +152,6 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
   };
 
   // Convert URLs in text to clickable links and \n to <br/>
-  const renderTextWithLinks = (text: string): React.ReactNode => {
-    if (!text) return text;
-    
-    // First, replace escaped \n with actual newlines
-    // Handle both \\n (escaped) and \n (literal newline characters)
-    let processedText = text.replace(/\\n/g, '\n');
-    
-    // Split by newlines (both \r\n and \n)
-    const lines = processedText.split(/\r?\n/);
-    const result: React.ReactNode[] = [];
-    
-    lines.forEach((line, lineIndex) => {
-      if (lineIndex > 0) {
-        result.push(<br key={`br-${lineIndex}`} />);
-      }
-      
-      // Skip empty lines unless they're not the first or last
-      if (line.trim() === '' && (lineIndex === 0 || lineIndex === lines.length - 1)) {
-        return;
-      }
-      
-      // URL regex pattern
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      const parts: React.ReactNode[] = [];
-      let lastIndex = 0;
-      let match;
-
-      while ((match = urlRegex.exec(line)) !== null) {
-        // Add text before the URL
-        if (match.index > lastIndex) {
-          parts.push(line.substring(lastIndex, match.index));
-        }
-        
-        // Add the URL as a link
-        const url = match[0];
-        parts.push(
-          <a
-            key={`url-${lineIndex}-${match.index}`}
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:underline break-all"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {url}
-          </a>
-        );
-        
-        lastIndex = match.index + url.length;
-      }
-      
-      // Add remaining text
-      if (lastIndex < line.length) {
-        parts.push(line.substring(lastIndex));
-      }
-      
-      if (parts.length > 0) {
-        result.push(<span key={`line-${lineIndex}`}>{parts}</span>);
-      } else if (line.trim() === '') {
-        // Preserve empty lines as spacing
-        result.push(<span key={`empty-${lineIndex}`}>&nbsp;</span>);
-      }
-    });
-    
-    return result.length > 0 ? <>{result}</> : text;
-  };
-
   // Get status icon and color for attendee response status
   const getStatusIcon = (status?: string) => {
     switch (status?.toUpperCase()) {
@@ -404,82 +338,24 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
       return null;
     }
 
-    // Strategy to find user's response status:
-    // 1. PRIORITIZE TENTATIVE and DECLINED statuses (more specific, likely user's own response)
-    // 2. If only one attendee has a status, that's likely the user
-    // 3. Prefer non-organizer attendees with statuses
-    // 4. Fallback to organizer if no other status found
+    const userEmail = googleCalendarConfig.userEmail?.toLowerCase();
     
-    const organizerEmail = event.organizer?.email?.toLowerCase();
-    
-    // Find all attendees with a response status (excluding NEEDS-ACTION)
-    const attendeesWithStatus = event.attendees.filter((attendee) => {
-      const status = attendee.responseStatus?.toUpperCase();
-      return status && status !== 'NEEDS-ACTION';
-    });
-
-    if (attendeesWithStatus.length === 0) {
-      return null;
-    }
-
-    // PRIORITY 1: If there's only one attendee with a status, that's likely the user
-    if (attendeesWithStatus.length === 1) {
-      const status = attendeesWithStatus[0].responseStatus?.toUpperCase();
-      if (status === 'ACCEPTED' || status === 'DECLINED' || status === 'TENTATIVE') {
-        return status as 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
-      }
-    }
-
-    // PRIORITY 2: Prioritize TENTATIVE and DECLINED (more specific statuses)
-    // These are more likely to be the user's own response, especially if different from organizer
-    const tentativeAttendee = attendeesWithStatus.find(
-      (attendee) => attendee.responseStatus?.toUpperCase() === 'TENTATIVE'
-    );
-    if (tentativeAttendee) {
-      return 'TENTATIVE';
-    }
-
-    const declinedAttendee = attendeesWithStatus.find(
-      (attendee) => attendee.responseStatus?.toUpperCase() === 'DECLINED'
-    );
-    if (declinedAttendee) {
-      return 'DECLINED';
-    }
-
-    // PRIORITY 3: If multiple attendees with status, prefer the one that's not the organizer
-    const nonOrganizerAttendee = attendeesWithStatus.find(
-      (attendee) => attendee.email?.toLowerCase() !== organizerEmail
-    );
-
-    if (nonOrganizerAttendee && nonOrganizerAttendee.responseStatus) {
-      const status = nonOrganizerAttendee.responseStatus.toUpperCase();
-      if (status === 'ACCEPTED' || status === 'DECLINED' || status === 'TENTATIVE') {
-        return status as 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
-      }
-    }
-
-    // PRIORITY 4: Check organizer if it's in attendees
-    if (organizerEmail) {
-      const organizerAttendee = event.attendees.find(
-        (attendee) => attendee.email?.toLowerCase() === organizerEmail
+    // If user email is configured, find that specific attendee
+    if (userEmail) {
+      const userAttendee = event.attendees.find(
+        (attendee) => attendee.email?.toLowerCase() === userEmail
       );
-      
-      if (organizerAttendee?.responseStatus) {
-        const status = organizerAttendee.responseStatus.toUpperCase();
+      if (userAttendee?.responseStatus) {
+        const status = userAttendee.responseStatus.toUpperCase();
         if (status === 'ACCEPTED' || status === 'DECLINED' || status === 'TENTATIVE') {
           return status as 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
         }
       }
+      // User email configured but not found in attendees or has NEEDS-ACTION
+      return null;
     }
 
-    // Fallback: use the first attendee with a status
-    if (attendeesWithStatus.length > 0 && attendeesWithStatus[0].responseStatus) {
-      const status = attendeesWithStatus[0].responseStatus.toUpperCase();
-      if (status === 'ACCEPTED' || status === 'DECLINED' || status === 'TENTATIVE') {
-        return status as 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
-      }
-    }
-
+    // No user email configured - cannot determine user's status
     return null;
   };
 
@@ -905,9 +781,14 @@ export function GoogleCalendarDashboardView({ config }: PluginComponentProps) {
 
           {/* Description */}
           {selectedEvent.description && (
-            <div className="text-sm text-muted-foreground">
-              {renderTextWithLinks(selectedEvent.description)}
-            </div>
+            <div 
+              className="text-sm text-muted-foreground"
+              dangerouslySetInnerHTML={{ 
+                __html: selectedEvent.description
+                  .replace(/\\n/g, '\n')
+                  .replace(/\n/g, '<br/>')
+              }}
+            />
           )}
 
           {/* Separator before participants */}

@@ -34,6 +34,7 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
   const [period, setPeriod] = useState<GoogleCalendarPeriod>(config?.period || '1-day');
   const [showPeriodPopover, setShowPeriodPopover] = useState(false);
   const [showAuthTypePopover, setShowAuthTypePopover] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>(config?.userEmail || '');
 
   // Load calendars when authenticated (OAuth mode only)
   useEffect(() => {
@@ -146,6 +147,7 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
         accessToken,
         selectedCalendarIds,
         period,
+        userEmail: userEmail.trim() || undefined,
       };
 
       onSave(newConfig);
@@ -168,6 +170,7 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
         authType: 'ical',
         icalUrl: icalUrl.trim(),
         period,
+        userEmail: userEmail.trim() || undefined,
       };
 
       onSave(newConfig);
@@ -325,25 +328,43 @@ export function GoogleCalendarConfigModal({ config, onSave, onClose }: GoogleCal
 
           {/* iCal URL Input */}
           {authType === 'ical' && (
-            <div>
-              <label htmlFor="icalUrl" className="text-sm font-medium mb-2 block">
-                Public iCal URL
-              </label>
-              <div className="flex items-center gap-2">
-                <LinkIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                <input
-                  id="icalUrl"
-                  type="url"
-                  value={icalUrl}
-                  onChange={(e) => setIcalUrl(e.target.value)}
-                  placeholder="https://calendar.google.com/calendar/ical/..."
-                  className="flex-1 px-3 py-2 border border-input rounded-md bg-background"
-                />
+            <>
+              <div>
+                <label htmlFor="icalUrl" className="text-sm font-medium mb-2 block">
+                  Public iCal URL
+                </label>
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <input
+                    id="icalUrl"
+                    type="url"
+                    value={icalUrl}
+                    onChange={(e) => setIcalUrl(e.target.value)}
+                    placeholder="https://calendar.google.com/calendar/ical/..."
+                    className="flex-1 px-3 py-2 border border-input rounded-md bg-background"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter the public iCal URL of your calendar. Most calendar services provide a public iCal feed URL.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Enter the public iCal URL of your calendar. Most calendar services provide a public iCal feed URL.
-              </p>
-            </div>
+              <div>
+                <label htmlFor="userEmail" className="text-sm font-medium mb-2 block">
+                  Your Email Address
+                </label>
+                <input
+                  type="email"
+                  id="userEmail"
+                  className="w-full px-3 py-2 border border-input rounded-md bg-background"
+                  value={userEmail}
+                  onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="your.email@example.com"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter your email address to correctly identify your response status in events. This must match the email used in your calendar.
+                </p>
+              </div>
+            </>
           )}
 
           {/* Calendar Selection (OAuth only) */}

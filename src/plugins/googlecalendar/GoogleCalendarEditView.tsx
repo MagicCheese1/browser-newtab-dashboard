@@ -10,6 +10,7 @@ export function GoogleCalendarEditView({ config, onConfigChange, isEditing }: Pl
     selectedCalendarIds: (config as unknown as GoogleCalendarConfig)?.selectedCalendarIds || [],
     icalUrl: (config as unknown as GoogleCalendarConfig)?.icalUrl,
     period: (config as unknown as GoogleCalendarConfig)?.period || '1-day',
+    userEmail: (config as unknown as GoogleCalendarConfig)?.userEmail,
   };
 
   const [showModal, setShowModal] = useState(isEditing);

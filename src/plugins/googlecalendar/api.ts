@@ -8,6 +8,15 @@ interface RecurrenceInfo {
   recurrenceId?: string; // RECURRENCE-ID for modified instances
 }
 
+// Decode iCal escape sequences: \\ -> \, \, -> ,, \; -> ;, \n -> newline
+function decodeICalText(text: string): string {
+  return text
+    .replace(/\\\\/g, '\\')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\n/g, '\n');
+}
+
 // Simple iCal parser with RRULE support
 function parseICal(icalText: string): GoogleCalendarEvent[] {
   const events: GoogleCalendarEvent[] = [];
@@ -84,12 +93,9 @@ function parseICal(icalText: string): GoogleCalendarEvent[] {
       if (line.startsWith('UID:')) {
         currentEvent.id = line.substring(4).trim();
       } else if (line.startsWith('SUMMARY:')) {
-        currentEvent.summary = line.substring(8).trim();
+        currentEvent.summary = decodeICalText(line.substring(8).trim());
       } else if (line.startsWith('DESCRIPTION:')) {
-        let description = line.substring(12).trim();
-        // Replace escaped \n with actual newlines in iCal format
-        description = description.replace(/\\n/g, '\n');
-        currentEvent.description = description;
+        currentEvent.description = decodeICalText(line.substring(12).trim());
       } else if (line.startsWith('DTSTART')) {
         const match = line.match(/DTSTART(?:;TZID=([^:]+))?:(.+)/);
         if (match) {
@@ -131,7 +137,7 @@ function parseICal(icalText: string): GoogleCalendarEvent[] {
           }
         }
       } else if (line.startsWith('LOCATION:')) {
-        currentEvent.location = line.substring(9).trim();
+        currentEvent.location = decodeICalText(line.substring(9).trim());
       } else if (line.startsWith('URL:')) {
         currentEvent.htmlLink = line.substring(4).trim();
       } else if (line.startsWith('ORGANIZER')) {
@@ -139,31 +145,93 @@ function parseICal(icalText: string): GoogleCalendarEvent[] {
         const match = line.match(/ORGANIZER(?:;CN=([^:]+))?:(.+)/);
         if (match) {
           const email = match[2].replace(/^mailto:/i, '').trim();
-          const displayName = match[1]?.trim();
+          const displayName = match[1] ? decodeICalText(match[1].trim()) : undefined;
           if (!currentEvent.organizer) {
             currentEvent.organizer = { email, displayName };
           }
         }
       } else if (line.startsWith('ATTENDEE')) {
         // Format: ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;CN=Name:mailto:email@example.com
-        // Extract CN (display name), PARTSTAT (response status), and email
+        // Extract CN (display name), PARTSTAT (response status), ROLE, and email
         const cnMatch = line.match(/;CN=([^:;]+)/);
         const partstatMatch = line.match(/;PARTSTAT=([^:;]+)/);
+        const roleMatch = line.match(/;ROLE=([^:;]+)/);
         const emailMatch = line.match(/:mailto:([^\s]+)/i) || line.match(/:([^\s@]+@[^\s@]+)/);
         
         if (emailMatch) {
-          const email = emailMatch[1].trim();
-          const displayName = cnMatch ? cnMatch[1].trim() : undefined;
-          const responseStatus = partstatMatch ? partstatMatch[1].trim() : 'NEEDS-ACTION';
+          const email = emailMatch[1].trim().toLowerCase();
+          const displayName = cnMatch ? decodeICalText(cnMatch[1].trim()) : undefined;
+          const responseStatus = partstatMatch ? partstatMatch[1].trim().toUpperCase() : 'NEEDS-ACTION';
+          const role = roleMatch ? roleMatch[1].trim().toUpperCase() : undefined;
           
           if (!currentEvent.attendees) {
             currentEvent.attendees = [];
           }
-          currentEvent.attendees.push({
-            email,
-            displayName,
-            responseStatus,
-          });
+          
+          // Check if an attendee with this email already exists (handle duplicates)
+          const existingIndex = currentEvent.attendees.findIndex(
+            (attendee) => attendee.email?.toLowerCase() === email
+          );
+          
+          // Priority order for response status: ACCEPTED > TENTATIVE > DECLINED > NEEDS-ACTION
+          // Priority order for role: REQ-PARTICIPANT > OPT-PARTICIPANT
+          const statusPriority: Record<string, number> = {
+            'ACCEPTED': 4,
+            'TENTATIVE': 3,
+            'DECLINED': 2,
+            'NEEDS-ACTION': 1,
+          };
+          
+          const rolePriority: Record<string, number> = {
+            'REQ-PARTICIPANT': 2,
+            'OPT-PARTICIPANT': 1,
+          };
+          
+          const currentStatusPriority = statusPriority[responseStatus] || 0;
+          const currentRolePriority = rolePriority[role || ''] || 0;
+          
+          if (existingIndex >= 0) {
+            const existing = currentEvent.attendees[existingIndex];
+            const existingStatus = existing.responseStatus?.toUpperCase() || 'NEEDS-ACTION';
+            const existingStatusPriority = statusPriority[existingStatus] || 0;
+            
+            // Determine if we should replace based on priority
+            let shouldReplace = false;
+            
+            if (currentStatusPriority > existingStatusPriority) {
+              // Higher status priority wins
+              shouldReplace = true;
+            } else if (currentStatusPriority === existingStatusPriority) {
+              // Same status priority, check role priority
+              const existingRole = (existing as any).role?.toUpperCase();
+              const existingRolePriority = rolePriority[existingRole || ''] || 0;
+              
+              if (currentRolePriority > existingRolePriority) {
+                // Higher role priority wins
+                shouldReplace = true;
+              } else if (currentRolePriority === existingRolePriority) {
+                // Same priority, keep the latest (replace)
+                shouldReplace = true;
+              }
+            }
+            
+            if (shouldReplace) {
+              currentEvent.attendees[existingIndex] = {
+                email,
+                displayName,
+                responseStatus,
+                ...(role && { role }),
+              };
+            }
+          } else {
+            // Add new attendee
+            currentEvent.attendees.push({
+              email,
+              displayName,
+              responseStatus,
+              ...(role && { role }),
+            });
+          }
         }
       } else if (line.startsWith('RRULE:')) {
         recurrenceInfo.rrule = line.substring(6).trim();
@@ -414,13 +482,10 @@ function hasTodayEvents(events: GoogleCalendarEvent[]): boolean {
 async function loadCachedICalEvents(icalUrl: string, allowExpired: boolean = false): Promise<{ events: GoogleCalendarEvent[]; expired: boolean } | null> {
   return new Promise((resolve) => {
     const cacheKey = getCacheKey(icalUrl);
-    const startTime = performance.now();
-    
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.get([cacheKey], (result) => {
         const cached = result[cacheKey];
         if (!cached) {
-          console.log('[iCal Cache] Cache miss for', icalUrl.substring(0, 50) + '...');
           resolve(null);
           return;
         }
@@ -434,16 +499,12 @@ async function loadCachedICalEvents(icalUrl: string, allowExpired: boolean = fal
           
           // Check if cache is still valid
           if (age < ICAL_CACHE_DURATION) {
-            const loadTime = performance.now() - startTime;
-            console.log(`[iCal Cache] Cache hit! Loaded ${events.length} events in ${loadTime.toFixed(2)}ms (cache age: ${Math.round(age / 1000)}s, key: ${cacheKey.substring(0, 20)}...)`);
             resolve({ events, expired: false });
           } else {
             // Cache expired
             if (allowExpired && hasTodayEvents(events)) {
-              console.log(`[iCal Cache] Cache expired but has today's events, using stale cache (age: ${Math.round(age / 1000)}s)`);
               resolve({ events, expired: true });
             } else {
-              console.log(`[iCal Cache] Cache expired (age: ${Math.round(age / 1000)}s, max: ${Math.round(ICAL_CACHE_DURATION / 1000)}s)`);
               resolve(null);
             }
           }
@@ -457,7 +518,6 @@ async function loadCachedICalEvents(icalUrl: string, allowExpired: boolean = fal
       try {
         const cached = localStorage.getItem(cacheKey);
         if (!cached) {
-          console.log('[iCal Cache] Cache miss (localStorage)');
           resolve(null);
           return;
         }
@@ -467,16 +527,12 @@ async function loadCachedICalEvents(icalUrl: string, allowExpired: boolean = fal
         const age = now - timestamp;
         
         if (age < ICAL_CACHE_DURATION) {
-          const loadTime = performance.now() - startTime;
-          console.log(`[iCal Cache] Cache hit (localStorage)! Loaded ${events.length} events in ${loadTime.toFixed(2)}ms`);
           resolve({ events, expired: false });
         } else {
           // Cache expired
           if (allowExpired && hasTodayEvents(events)) {
-            console.log(`[iCal Cache] Cache expired but has today's events, using stale cache (localStorage, age: ${Math.round(age / 1000)}s)`);
             resolve({ events, expired: true });
           } else {
-            console.log(`[iCal Cache] Cache expired (localStorage, age: ${Math.round(age / 1000)}s)`);
             resolve(null);
           }
         }
@@ -490,35 +546,30 @@ async function loadCachedICalEvents(icalUrl: string, allowExpired: boolean = fal
 
 // Save iCal events to cache
 async function saveCachedICalEvents(icalUrl: string, events: GoogleCalendarEvent[]): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const cacheKey = getCacheKey(icalUrl);
     const cacheData = {
       events,
       timestamp: Date.now(),
     };
     
-    const saveStartTime = performance.now();
-    
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ [cacheKey]: JSON.stringify(cacheData) }, () => {
         if (chrome.runtime.lastError) {
           console.error('[iCal Cache] Failed to save to chrome.storage:', chrome.runtime.lastError.message);
+          reject(new Error(chrome.runtime.lastError.message));
         } else {
-          const saveTime = performance.now() - saveStartTime;
-          console.log(`[iCal Cache] Successfully saved ${events.length} events to cache (key: ${cacheKey.substring(0, 20)}...) in ${saveTime.toFixed(2)}ms`);
+          resolve();
         }
-        resolve();
       });
     } else {
       // Fallback to localStorage
       try {
         localStorage.setItem(cacheKey, JSON.stringify(cacheData));
-        const saveTime = performance.now() - saveStartTime;
-        console.log(`[iCal Cache] Successfully saved ${events.length} events to localStorage cache in ${saveTime.toFixed(2)}ms`);
         resolve();
       } catch (e) {
         console.error('[iCal Cache] Failed to save cached iCal data to localStorage:', e);
-        resolve();
+        reject(e);
       }
     }
   });
@@ -568,7 +619,6 @@ async function refreshICalCache(icalUrl: string): Promise<void> {
     });
     
     await saveCachedICalEvents(icalUrl, eventsToCache);
-    console.log(`[iCal Cache] Background refresh completed, cached ${eventsToCache.length} events`);
   } catch (error) {
     console.error('[iCal Cache] Background refresh error:', error);
   }
@@ -621,7 +671,6 @@ async function fetchICalEvents(icalUrl: string, period: string): Promise<GoogleC
       
       // If cache is expired, refresh in background
       if (expired) {
-        console.log('[iCal Cache] Cache expired, refreshing in background...');
         // Don't await - refresh in background
         refreshICalCache(icalUrl).catch((err: unknown) => {
           console.error('[iCal Cache] Background refresh failed:', err);
@@ -663,10 +712,7 @@ async function fetchICalEvents(icalUrl: string, period: string): Promise<GoogleC
       throw new Error('The URL does not appear to be a valid iCal file. Please verify the URL points to an .ics file.');
     }
     
-    const parseStartTime = performance.now();
     let allEvents = parseICal(icalText);
-    const parseTime = performance.now() - parseStartTime;
-    console.log(`[iCal] Parsed ${allEvents.length} events in ${parseTime.toFixed(2)}ms`);
     
     // Deduplicate events: if there's a RECURRENCE-ID event, remove the corresponding generated occurrence
     // Events with RECURRENCE-ID have IDs like "uid-recurrence-20251215T140000"
@@ -711,9 +757,7 @@ async function fetchICalEvents(icalUrl: string, period: string): Promise<GoogleC
     });
     
     // Add back the RECURRENCE-ID events
-    const beforeDedup = allEvents.length;
     allEvents = [...deduplicatedEvents, ...Array.from(recurrenceIdMap.values())];
-    console.log(`[iCal] Deduplicated: ${allEvents.length} events (removed ${beforeDedup - allEvents.length} duplicates)`);
     
     // Filter to keep only future events and today's events for cache (to save storage space)
     const now = new Date();
@@ -729,22 +773,13 @@ async function fetchICalEvents(icalUrl: string, period: string): Promise<GoogleC
       return endDate.getTime() >= cacheCutoff;
     });
     
-    console.log(`[iCal Cache] Filtered ${allEvents.length} events to ${eventsToCache.length} events for cache (today + future)`);
-    
     // Save to cache (save only future/today events to reduce storage size)
-    const saveStartTime = performance.now();
     await saveCachedICalEvents(icalUrl, eventsToCache);
-    const saveTime = performance.now() - saveStartTime;
-    console.log(`[iCal Cache] Saved ${eventsToCache.length} events to cache in ${saveTime.toFixed(2)}ms`);
     
     // Filter events by period
     const { timeMin, timeMax } = getDateRange(period);
     const timeMinDate = new Date(timeMin);
     const timeMaxDate = new Date(timeMax);
-    
-    console.log(`[iCal Filter] Filtering events for period "${period}"`);
-    console.log(`[iCal Filter] Date range: ${timeMinDate.toLocaleString()} to ${timeMaxDate.toLocaleString()}`);
-    console.log(`[iCal Filter] Total events before filtering: ${allEvents.length}`);
     
     const filteredEvents = allEvents.filter((event) => {
       const startDate = event.start.dateTime 
@@ -766,8 +801,6 @@ async function fetchICalEvents(icalUrl: string, period: string): Promise<GoogleC
       
       return isInRange;
     });
-    
-    console.log(`[iCal Filter] Events after filtering: ${filteredEvents.length}`);
     
     // Sort by start time
     filteredEvents.sort((a, b) => {

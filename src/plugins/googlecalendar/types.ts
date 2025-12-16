@@ -8,6 +8,7 @@ export interface GoogleCalendarConfig {
   selectedCalendarIds?: string[]; // For OAuth
   icalUrl?: string; // For iCal public URL
   period: GoogleCalendarPeriod;
+  userEmail?: string; // Current user's email for status detection
 }
 
 export interface GoogleCalendar {
@@ -38,6 +39,7 @@ export interface GoogleCalendarEvent {
     email: string;
     displayName?: string;
     responseStatus?: string;
+    role?: string; // REQ-PARTICIPANT, OPT-PARTICIPANT, etc.
   }>;
   organizer?: {
     email: string;
