@@ -43,9 +43,11 @@ export function Frame({ frame, onDelete, onConfigChange, onNameChange, onNsfwTog
 
   const handleConfigChange = (config: Record<string, unknown>) => {
     onConfigChange(frame.id, config);
-    // Exit edit mode after saving configuration
-    setIsEditing(false);
   };
+
+  const handleExitEditMode = () => {
+    setIsEditing(false);
+  }
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -200,6 +202,7 @@ export function Frame({ frame, onDelete, onConfigChange, onNameChange, onNsfwTog
             config={frame.config}
             isEditing={isEditing}
             onConfigChange={handleConfigChange}
+            onExitEditMode={handleExitEditMode}
           />
         )}
       </div>

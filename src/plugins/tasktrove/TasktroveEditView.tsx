@@ -2,7 +2,7 @@ import { PluginComponentProps } from '@/types/plugin';
 import { TasktroveConfig } from './types';
 import { TasktroveConfigModal } from './TasktroveConfigModal';
 
-export function TasktroveEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
+export function TasktroveEditView({ config, onConfigChange, isEditing, onExitEditMode }: PluginComponentProps) {
   const tasktroveConfig = (config as unknown as TasktroveConfig) || {
     apiEndpoint: '',
     apiToken: '',
@@ -19,14 +19,11 @@ export function TasktroveEditView({ config, onConfigChange, isEditing }: PluginC
 
   const handleSave = (newConfig: TasktroveConfig) => {
     onConfigChange(newConfig as unknown as Record<string, unknown>);
-    // isEditing will be set to false by Frame's handleConfigChange
+    onExitEditMode();
   };
 
   const handleClose = () => {
-    // When closing without saving, we need to exit edit mode
-    // We can do this by calling onConfigChange with the current config
-    // This will trigger handleConfigChange in Frame which sets isEditing to false
-    onConfigChange(tasktroveConfig as unknown as Record<string, unknown>);
+    onExitEditMode();
   };
 
   return (

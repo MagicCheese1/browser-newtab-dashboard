@@ -3,7 +3,7 @@ import { GoogleCalendarConfig } from './types';
 import { GoogleCalendarConfigModal } from './GoogleCalendarConfigModal';
 import { PluginComponentProps } from '@/types/plugin';
 
-export function GoogleCalendarEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
+export function GoogleCalendarEditView({ config, onConfigChange, isEditing, onExitEditMode }: PluginComponentProps) {
   const googleCalendarConfig: GoogleCalendarConfig = {
     authType: (config as unknown as GoogleCalendarConfig)?.authType,
     accessToken: (config as unknown as GoogleCalendarConfig)?.accessToken,
@@ -25,10 +25,12 @@ export function GoogleCalendarEditView({ config, onConfigChange, isEditing }: Pl
   const handleSave = (newConfig: GoogleCalendarConfig) => {
     onConfigChange(newConfig as unknown as Record<string, unknown>);
     setShowModal(false);
+    onExitEditMode();
   };
 
   const handleClose = () => {
     setShowModal(false);
+    onExitEditMode();
   };
 
   if (!showModal) {

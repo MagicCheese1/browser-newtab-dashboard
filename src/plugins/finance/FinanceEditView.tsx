@@ -4,7 +4,7 @@ import { FinanceConfig } from './types';
 import { FinanceConfigModal } from './FinanceConfigModal';
 import { PluginComponentProps } from '@/types/plugin';
 
-export function FinanceEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
+export function FinanceEditView({ config, onConfigChange, isEditing, onExitEditMode}: PluginComponentProps) {
   const financeConfig = (config as unknown as FinanceConfig) || {
     apiEndpoint: '',
     apiToken: '',
@@ -25,10 +25,12 @@ export function FinanceEditView({ config, onConfigChange, isEditing }: PluginCom
   const handleSave = (newConfig: FinanceConfig) => {
     onConfigChange(newConfig as unknown as Record<string, unknown>);
     setShowModal(false);
+    onExitEditMode();
   };
 
   const handleClose = () => {
     setShowModal(false);
+    onExitEditMode();
   };
 
   if (!showModal) {

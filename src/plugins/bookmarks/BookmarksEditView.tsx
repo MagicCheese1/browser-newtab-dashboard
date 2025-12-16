@@ -123,7 +123,7 @@ function SortableBookmarkItem({ bookmark, onEdit, onDelete }: SortableBookmarkIt
   );
 }
 
-export function BookmarksEditView({ config, onConfigChange, isEditing }: PluginComponentProps) {
+export function BookmarksEditView({ config, onConfigChange, isEditing, onExitEditMode }: PluginComponentProps) {
   const bookmarksConfig = (config as unknown as BookmarksConfig) || { bookmarks: [] };
   const bookmarks = bookmarksConfig.bookmarks || [];
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
@@ -229,6 +229,9 @@ export function BookmarksEditView({ config, onConfigChange, isEditing }: PluginC
           onClose={() => {
             setEditingBookmark(null);
             setIsAdding(false);
+            if (bookmarks.length === 0) {
+              onExitEditMode();
+            }
           }}
           focusUrl={isAdding}
         />
