@@ -12,7 +12,7 @@ export function SpaceTabs({ spaces, activeSpaceId, onSpaceSelect }: SpaceTabsPro
   }
 
   return (
-    <div className="flex gap-1 px-2 py-2 border-b border-border bg-muted/30">
+    <div className="flex gap-1 px-2 pt-2 border-b border-border bg-muted/30">
       {spaces.map((space) => {
         const isActive = space.id === activeSpaceId;
         return (

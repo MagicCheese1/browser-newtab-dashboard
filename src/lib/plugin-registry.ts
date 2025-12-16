@@ -1,10 +1,12 @@
 import { Plugin, PluginMetadata } from '@/types/plugin';
+
 import { BookmarksPlugin } from '@/plugins/bookmarks/BookmarksPlugin';
-import { YoutrackPlugin } from '@/plugins/youtrack/YoutrackPlugin';
-import { TasktrovePlugin } from '@/plugins/tasktrove/TasktrovePlugin';
-import { MeteoPlugin } from '@/plugins/meteo/MeteoPlugin';
+import { ClockPlugin } from '@/plugins/clock/ClockPlugin';
 import { FinancePlugin } from '@/plugins/finance/FinancePlugin';
 import { GoogleCalendarPlugin } from '@/plugins/googlecalendar/GoogleCalendarPlugin';
+import { MeteoPlugin } from '@/plugins/meteo/MeteoPlugin';
+import { TasktrovePlugin } from '@/plugins/tasktrove/TasktrovePlugin';
+import { YoutrackPlugin } from '@/plugins/youtrack/YoutrackPlugin';
 
 class PluginRegistry {
   private plugins: Map<string, Plugin> = new Map();
@@ -16,6 +18,7 @@ class PluginRegistry {
     this.registerPlugin(MeteoPlugin);
     this.registerPlugin(FinancePlugin);
     this.registerPlugin(GoogleCalendarPlugin);
+    this.registerPlugin(ClockPlugin);
   }
 
   registerPlugin(plugin: Plugin): void {
