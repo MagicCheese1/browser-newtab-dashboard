@@ -125,6 +125,24 @@ Display financial summary and net worth from [Firefly](https://github.com/firefl
 - Currency: Select EUR or USD
 - Period: Choose time period for the summary
 
+### 6. Clock
+
+Display a configurable clock with analog and digital themes.
+
+**Features:**
+- Multiple themes: analog (classic, modern, minimal) and digital (simple, modern, neon, minimal)
+- Timezone support (uses system timezone by default, displays selected timezone name)
+- Date display (optional)
+- Digital format: 12h (AM/PM) or 24h
+- Optional sunrise / sunset display with per-day caching to avoid extra API calls
+
+**Configuration:**
+- Theme: choose analog or digital styles
+- Timezone: system default or custom IANA timezone (e.g., Europe/Paris)
+- Date display: on/off
+- Time format: 12h or 24h
+- Sunrise/Sunset: on/off (requires latitude/longitude to compute times)
+
 ## Installation
 
 ### For Development
@@ -337,18 +355,6 @@ Contributions are welcome! Please:
 ## License
 
 This project is licensed under the MIT License.
-
-## Version History
-
-- **1.0.3**: Current version
-  - Fix path in manifest
-  - Remove unused permission
-
-- **1.0.2**:
-  - Multiple widget types
-  - Export/Import functionality
-  - Dark mode support
-  - Responsive grid layout
 
 ## Support
 
